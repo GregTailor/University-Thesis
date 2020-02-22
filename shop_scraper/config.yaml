@@ -1,0 +1,13 @@
+folders:
+  log: ./log
+database:
+  host: localhost
+  db_name: postgres
+tesco:
+  sitemap: https://bevasarlas.tesco.hu/groceries/HU.hu.plp.sitemap.xml
+auchan:
+  start_url: https://online.auchan.hu/shop/catalog
+  base_url: https://online.auchan.hu/shop/catalog/  # likely the same as the start_url, but do not change this
+                                                    # as this is for removing this part from the url to get the
+                                                    # category of the current page
+  delay: 0
