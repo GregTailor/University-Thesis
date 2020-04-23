@@ -1,0 +1,6 @@
+{
+  "tesco":{
+    "sitemap": "https://bevasarlas.tesco.hu/groceries/HU.hu.plp.sitemap.xml",
+    "number_of_pages_to_scrape": -1
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "user": "root",
+  "password": "admin",
+  "host": "localhost",
+  "database_name": "shopscraper"
+}
