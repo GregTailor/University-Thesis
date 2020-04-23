@@ -1,79 +1,86 @@
 import logging
 from abc import ABC, abstractmethod
+from datetime import datetime
 
-import pandas
+from sqlalchemy import engine, MetaData, Table, Column, String, DateTime, Integer, Boolean
 
-from helper import get_config
-
-
-config = get_config()
+from util import get_config
 
 
 class Shop(ABC):
 
-    def __init__(self, leafpages=None):
-        self.config = config[self.__class__.__name__.lower()]
-        self.leafpages = set() if not leafpages else leafpages
-        self.df = pandas.DataFrame()
+    database_configuration = get_config('database_config.json')
+    config = get_config('config.json')
 
-    @property
-    @abstractmethod
-    def data_dict(self):
-        pass
-
-    def __repr__(self):
-        return ''
-
-    def _scrape(self):
-        """Collects all the leafpages and scrape every leafpage, thus filling the Dataframe"""
-        if not self.leafpages:
-            self.collect_leafpages()
-            logging.info('The leafpages are collected')
-
-        for page_url in self.leafpages:
-            try:
-                html = self.get_html(page_url)
-                self.scrape_leafpage(html, page_url)
-            except Exception as ex:
-                logging.error('Unexpected error occurred during scraping page %s: %s', page_url, ex)
+    def __init__(self):
+        self.shop_config = self.config[self.__class__.__name__.lower()]
+        self.number_of_pages_to_scrape = self.shop_config['number_of_pages_to_scrape']
+        self.scrape_date = None
+        self.leafpages = []
+        self.database_engine = engine.create_engine('mysql://root:admin@localhost/shopscraper')
+        self.database_metadata = MetaData(self.database_engine)
+        self.database_table_exists = True if self.__class__.__name__.lower() in self.database_engine.table_names() else False
+        self.database_table = None
+        self.database_connection = None
 
     @abstractmethod
-    def collect_leafpages(self):
-        """Collects the leafpages, by appending them to self.leafpages"""
+    def collect_page_urls(self):
         pass
 
     @staticmethod
     @abstractmethod
     def get_html(url):
-        """
-
-        Sends a request to the given url
-        the return is r.text for BeautifulSoup
-        the return is r.html for requests-html
-
-        """
         pass
 
     @abstractmethod
-    def scrape_leafpage(self, html, url):
-        """Scrapes the html, and appends the results to self.data_dict"""
+    def scrape_page(self, html, url):
         pass
 
     def scrape(self):
+        self.scrape_date = datetime.now()  # .strftime("%Y%m%d_%H%M%S")
+
+        if not self.database_table_exists:
+            self.database_table_does_not_exist()
         logging.info('The scraping for shop %s started', self.__class__.__name__)
+        logging.info('Number of pages to scrape: %s',
+                     str(self.number_of_pages_to_scrape) if self.number_of_pages_to_scrape > 0 else 'all')
 
-        self._scrape()
-
+        self.collect_page_urls()
+        logging.info('The leafpages are collected')
+        self.database_table = Table(self.__class__.__name__.lower(), self.database_metadata,
+                                    autoload=True, autoload_with=self.database_engine)
+        self.database_connection = self.database_engine.connect()
+        while self.leafpages and self.number_of_pages_to_scrape != 0:
+            page_url = self.leafpages.pop()
+            try:
+                html = self.get_html(page_url)
+                self.scrape_page(html, page_url)
+                self.number_of_pages_to_scrape = self.number_of_pages_to_scrape - 1
+            except Exception as ex:
+                logging.error('Unexpected error occurred during scraping page %s: %s', page_url, ex)
+        self.database_connection.close()
         logging.info('The scraping for shop %s finished', self.__class__.__name__)
 
-        df = pandas.DataFrame(self.data_dict)
-        self.df = df
-        self.df.drop_duplicates(subset=['Name', 'Price', 'Unit_price', 'Unit_type', 'Category', 'Store'])
-        logging.info('Pandas dataframe created for shop %s', self.__class__.__name__)
+    def to_sql(self, name, price, discount, unit_price, unit_type, category, link, store):
+        if self.database_table is not None and self.database_connection is not None:
+            insert_command = self.database_table.insert().values(name=name, date=self.scrape_date, price=price,
+                                                                 discount=discount, unit_price=unit_price,
+                                                                 unit_type=unit_type, category=category,
+                                                                 link=link, store=store)
+            self.database_connection.execute(insert_command)
 
-        return self.df
+    def database_table_does_not_exist(self):
+        self.create_table()
 
-    def to_excel(self, filename):
-        if filename[-5:] != '.xlsx':
-            filename += '.xlsx'
-        self.df.to_excel(filename)
+    def create_table(self):
+        Table(self.__class__.__name__.lower(), self.database_metadata,
+              Column('name', String(256), primary_key=True),
+              Column('date', DateTime, primary_key=True),
+              Column('price', Integer),
+              Column('discount', Boolean),
+              Column('unit_price', Integer),
+              Column('unit_type', String(64)),
+              Column('category', String(256)),
+              Column('link', String(256)),
+              Column('store', String(256)))
+        self.database_metadata.create_all()
